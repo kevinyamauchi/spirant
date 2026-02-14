@@ -1,0 +1,11 @@
+[package]
+name = "spirant"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+defmt = { version = "0.3", optional = true }
+
+[features]
+default = []
+defmt = ["dep:defmt"]
