@@ -1,0 +1,33 @@
+[package]
+name = "spirant-oled-display-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Async OLED display driver for the SSD1306 (128×64) using Embassy"
+
+[dependencies]
+# Embassy async framework (only needed for display_update_task)
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "dc18ee2", optional = true }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "dc18ee2", features = ["defmt"], optional = true }
+
+# Hardware abstraction
+embedded-hal-async = "1.0"
+embedded-graphics = "0.8"
+
+# Display
+ssd1306 = { version = "0.10", features = ["async"] }
+display-interface = "0.5"
+display-interface-i2c = "0.5"
+
+# Utilities
+heapless = "0.8"
+
+# Logging (optional)
+defmt = { version = "0.3", optional = true }
+
+# Shared parameter state
+spirant = { path = "../spirant-parameter-values-rs" }
+
+[features]
+default = ["defmt"]
+defmt = ["dep:defmt"]
+task = ["dep:embassy-sync", "dep:embassy-time"]
