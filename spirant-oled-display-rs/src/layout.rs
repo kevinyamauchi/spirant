@@ -24,7 +24,7 @@ use heapless::String;
 /// without modifying library source.
 ///
 /// [`DisplayConfig::default()`] reproduces the original design geometry
-/// (128×64, 4 × 32 px columns, 30 Hz).
+/// (128×64, 4 × 32 px columns, 60 Hz).
 pub struct DisplayConfig {
     /// Display refresh rate in Hz. Default: 30. Max: 60.
     pub update_frequency_hz: u32,
@@ -47,7 +47,7 @@ pub struct DisplayConfig {
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
-            update_frequency_hz: 30,
+            update_frequency_hz: 60,
             display_width: 128,
             display_height: 64,
             column_width: 32,
