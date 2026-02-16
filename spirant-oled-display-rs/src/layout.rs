@@ -47,7 +47,7 @@ pub struct DisplayConfig {
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
-            update_frequency_hz: 30,
+            update_frequency_hz: 60,
             display_width: 128,
             display_height: 64,
             column_width: 32,
