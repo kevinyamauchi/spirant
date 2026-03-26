@@ -71,10 +71,10 @@ pub const PAGE_NAMES: [&str; N_PAGES] = ["Filter", "Envelope", "LFO", "Effects"]
 pub const PARAM_NAMES: [[Option<&str>; PARAMS_PER_PAGE]; N_PAGES] = [
     // Page 0: Filter (all 4 slots active)
     [
-        Some("Cutoff"),
-        Some("Resonance"),
-        Some("Filter Type"),
-        Some("Filter Env"),
+        Some("Cut"),
+        Some("Res"),
+        Some("Type"),
+        Some("Env"),
     ],
     // Page 1: Envelope (all 4 slots active)
     [
