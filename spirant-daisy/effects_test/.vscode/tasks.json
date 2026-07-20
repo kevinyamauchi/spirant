@@ -1,0 +1,95 @@
+{
+    "version": "2.0.0",
+    "options": {
+        "cwd": "${workspaceFolder}"
+    },
+    "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated"
+    },
+    "tasks": [
+        {
+            "label": "build",
+            "command": "make",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": {
+                "owner": "cpp",
+                "fileLocation": ["relative", "${workspaceFolder}"],
+                "pattern": {
+                    "regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "severity": 4,
+                    "message": 5
+                }
+            }
+        },
+        {
+            "label": "clean",
+            "command": "make",
+            "args": ["clean"],
+            "problemMatcher": []
+        },
+        {
+            "label": "clean-build",
+            "dependsOrder": "sequence",
+            "dependsOn": ["clean", "build"],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "build_libdaisy",
+            "command": "make",
+            "type": "shell",
+            "options": {
+                "cwd": "${workspaceFolder}/../libDaisy"
+            },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "build_daisysp",
+            "command": "make",
+            "type": "shell",
+            "options": {
+                "cwd": "${workspaceFolder}/../DaisySP"
+            },
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "build_all",
+            "dependsOrder": "sequence",
+            "dependsOn": ["build_libdaisy", "build_daisysp", "build"],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "build_all_debug",
+            "dependsOrder": "sequence",
+            "dependsOn": ["build_libdaisy", "build_daisysp"],
+            "command": "make",
+            "args": ["DEBUG=1"],
+            "type": "shell",
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "flash-dfu",
+            "command": "make",
+            "args": ["program-dfu"],
+            "dependsOn": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "flash-stlink",
+            "command": "make",
+            "args": ["program"],
+            "dependsOn": "build",
+            "problemMatcher": []
+        }
+    ]
+}

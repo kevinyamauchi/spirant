@@ -1,0 +1,33 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug (ST-Link)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "openocd",
+            "configFiles": [
+                "interface/stlink.cfg",
+                "target/stm32h7x.cfg"
+            ],
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/prototype.elf",
+            "interface": "swd",
+            "openOCDLaunchCommands": [
+                "init",
+                "reset init",
+                "gdb_breakpoint_override hard"
+            ],
+            "preRestartCommands": [
+                "load",
+                "enable breakpoint",
+                "monitor reset"
+            ],
+            "runToEntryPoint": "main",
+            "svdFile": "${workspaceFolder}/../libDaisy/.vscode/STM32H750x.svd",
+            "preLaunchTask": "build",
+            "showDevDebugOutput": "none",
+            "armToolchainPath": "/Library/DaisyToolchain/0.2.0/arm/bin"
+        }
+    ]
+}
