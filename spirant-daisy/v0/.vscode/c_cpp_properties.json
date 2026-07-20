@@ -1,0 +1,34 @@
+{
+    "configurations": [
+        {
+            "name": "Mac",
+            "includePath": [
+                "/Library/DaisyToolchain/0.2.0/arm/arm-none-eabi/include",
+                "${workspaceFolder}",
+                "${workspaceFolder}/../libDaisy/src",
+                "${workspaceFolder}/../libDaisy/src/sys",
+                "${workspaceFolder}/../libDaisy/src/usbd",
+                "${workspaceFolder}/../libDaisy/Drivers/CMSIS_5/CMSIS/Core/Include",
+                "${workspaceFolder}/../libDaisy/Drivers/CMSIS-Device/ST/STM32H7xx/Include",
+                "${workspaceFolder}/../libDaisy/Drivers/STM32H7xx_HAL_Driver/Inc",
+                "${workspaceFolder}/../libDaisy/Drivers/STM32H7xx_HAL_Driver/Inc/Legacy",
+                "${workspaceFolder}/../libDaisy/Middlewares/ST/STM32_USB_Device_Library/Core/Inc",
+                "${workspaceFolder}/../libDaisy/Middlewares/ST/STM32_USB_Device_Library/Class/CDC/Inc",
+                "${workspaceFolder}/../libDaisy/Middlewares/ST/STM32_USB_Host_Library/Core/Inc",
+                "${workspaceFolder}/../libDaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MSC/Inc",
+                "${workspaceFolder}/../libDaisy/Middlewares/ST/STM32_USB_Host_Library/Class/MIDI/Inc",
+                "${workspaceFolder}/../DaisySP/Source"
+            ],
+            "defines": [
+                "STM32H750xx",
+                "USE_HAL_DRIVER",
+                "CORE_CM7"
+            ],
+            "intelliSenseMode": "gcc-arm",
+            "compilerPath": "/Library/DaisyToolchain/0.2.0/arm/bin/arm-none-eabi-gcc",
+            "cStandard": "c11",
+            "cppStandard": "gnu++14"
+        }
+    ],
+    "version": 4
+}
