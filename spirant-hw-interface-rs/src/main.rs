@@ -12,6 +12,10 @@
 //!    `changed_oled` flag, builds a new `DisplayState`, and flushes the
 //!    updated frame to the screen.
 //!
+//! The encoder task additionally polls the four encoder push-buttons every
+//! 20 ms (interleaved with the rotation interrupt via `select`): a press of
+//! encoder 0 pages backward and encoder 3 pages forward, both wrapping.
+//!
 //! No I2C communication with the Daisy Seed is implemented in this stage.
 
 #![no_std]
@@ -27,11 +31,13 @@ use embassy_rp::peripherals::I2C0;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_embedded_hal::shared_bus::asynch::i2c::I2cDevice;
+use embassy_futures::select::{select, Either};
+use embassy_time::{Duration, Timer};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 use encoder_driver::{QuadEncoderBoard, DEFAULT_ADDRESS};
-use spirant::parameter_values::ParameterValues;
+use spirant::parameter_values::{ParameterValues, N_PAGES};
 use spirant_oled_display_rs::{display_update_task, DisplayConfig, OledDriver};
 
 // ---------------------------------------------------------------------------
@@ -97,12 +103,17 @@ async fn oled_task(
     display_update_task(driver, params, config).await;
 }
 
-/// Interrupt-driven encoder monitoring task.
+/// Encoder monitoring task — rotation (interrupt-driven) plus button polling.
 ///
-/// Waits for the INT pin to go LOW (active-low from the encoder board),
-/// reads all 4 encoder positions, computes deltas against the previous
-/// baseline, and writes non-zero deltas into `ParameterValues`. The mutex
-/// is held only during the in-memory update — never during I2C operations.
+/// Each loop iteration waits on whichever comes first:
+/// - the INT pin going LOW (a rotation): read all 4 positions, compute deltas
+///   against the previous baseline, and apply non-zero deltas to the current
+///   page's parameters; or
+/// - a 20 ms timer tick: poll the four push-buttons and, on a fresh press of
+///   encoder 0 / encoder 3, page backward / forward (wrapping).
+///
+/// The `ParameterValues` mutex is held only during in-memory updates — never
+/// during I2C operations.
 #[embassy_executor::task]
 async fn encoder_task(
     mut int_pin: Input<'static>,
@@ -120,55 +131,91 @@ async fn encoder_task(
         Err(_) => warn!("Could not read initial positions; starting from [0; 4]"),
     }
 
+    // Button poll interval and previous state for rising-edge detection.
+    const BUTTON_POLL: Duration = Duration::from_millis(20);
+    let mut previous_buttons = [false; 4];
+
     loop {
         // wait_for_low() is used instead of wait_for_falling_edge() — confirmed
-        // reliable with this encoder board during hardware testing.
-        int_pin.wait_for_low().await;
+        // reliable with this encoder board during hardware testing. Race it
+        // against the button-poll timer; whichever fires first is handled.
+        match select(int_pin.wait_for_low(), Timer::after(BUTTON_POLL)).await {
+            // ── Rotation ─────────────────────────────────────────────
+            Either::First(_) => {
+                let positions = match encoder_board.read_all_positions().await {
+                    Ok(p) => p,
+                    Err(_) => {
+                        error!("Encoder read failed");
+                        // Clear flags even on error so INT returns HIGH and the
+                        // next movement produces a fresh interrupt rather than
+                        // spinning the task in a tight error loop.
+                        let _ = encoder_board.clear_interrupt_flags().await;
+                        continue;
+                    }
+                };
 
-        let positions = match encoder_board.read_all_positions().await {
-            Ok(p) => p,
-            Err(_) => {
-                error!("Encoder read failed");
-                // Clear interrupt flags even on error so INT returns HIGH and
-                // the next movement produces a fresh interrupt rather than
-                // causing the task to spin in a tight error loop.
-                let _ = encoder_board.clear_interrupt_flags().await;
-                continue;
-            }
-        };
+                // Clear AFTER reading positions — drives INT back HIGH.
+                // Clearing before reading would risk missing a rapid second
+                // movement that arrives during the I2C read.
+                if let Err(_) = encoder_board.clear_interrupt_flags().await {
+                    warn!("Failed to clear interrupt flags");
+                }
 
-        // Clear AFTER reading positions — drives INT back HIGH.
-        // Clearing before reading would risk missing a rapid second movement
-        // that arrives during the I2C read.
-        if let Err(_) = encoder_board.clear_interrupt_flags().await {
-            warn!("Failed to clear interrupt flags");
-        }
+                let deltas: [i32; 4] =
+                    core::array::from_fn(|i| positions[i] - previous_positions[i]);
 
-        let deltas: [i32; 4] = core::array::from_fn(|i| {
-            positions[i] - previous_positions[i]
-        });
+                // Update baseline unconditionally — tracks hardware state even
+                // when all deltas are zero (e.g. spurious power-on interrupt).
+                previous_positions = positions;
 
-        // Update baseline unconditionally — tracks hardware state even when
-        // all deltas are zero (e.g. spurious power-on interrupt).
-        previous_positions = positions;
+                if deltas.iter().all(|&d| d == 0) {
+                    continue;
+                }
 
-        if deltas.iter().all(|&d| d == 0) {
-            continue;
-        }
-
-        // Mutex held only during in-memory updates — never during I2C.
-        {
-            let mut params = param_values.lock().await;
-            for (encoder_idx, &delta) in deltas.iter().enumerate() {
-                if delta != 0 {
-                    params.update_from_encoder(encoder_idx, delta);
-                    debug!(
-                        "Encoder {}: delta={}, position={}",
-                        encoder_idx, delta, positions[encoder_idx]
-                    );
+                // Mutex held only during in-memory updates — never during I2C.
+                let mut params = param_values.lock().await;
+                for (encoder_idx, &delta) in deltas.iter().enumerate() {
+                    if delta != 0 {
+                        params.update_from_encoder(encoder_idx, delta);
+                        debug!(
+                            "Encoder {}: delta={}, position={}",
+                            encoder_idx, delta, positions[encoder_idx]
+                        );
+                    }
                 }
             }
-        } // mutex released here
+
+            // ── Button poll ──────────────────────────────────────────
+            Either::Second(_) => {
+                let buttons = match encoder_board.read_buttons().await {
+                    Ok(b) => b,
+                    Err(_) => {
+                        warn!("Button read failed");
+                        continue;
+                    }
+                };
+
+                // Rising edge = pressed now, released last poll.
+                let prev_next = buttons[3] && !previous_buttons[3];
+                let prev_back = buttons[0] && !previous_buttons[0];
+                previous_buttons = buttons;
+
+                if prev_next || prev_back {
+                    let mut params = param_values.lock().await;
+                    let current = params.current_page();
+                    // Encoder 3 → forward, encoder 0 → backward (wrapping).
+                    // Forward wins if both are pressed on the same poll.
+                    let next = if prev_next {
+                        (current + 1) % N_PAGES
+                    } else {
+                        (current + N_PAGES - 1) % N_PAGES
+                    };
+                    // set_active_page marks the new page's slots for redraw.
+                    let _ = params.set_active_page(next);
+                    debug!("Page switch: {} -> {}", current, next);
+                }
+            }
+        }
     }
 }
 
@@ -241,6 +288,12 @@ async fn main(spawner: Spawner) {
     // interrupts were enabled, so INT starts HIGH and clean.
     if let Err(_) = encoder_board.clear_interrupt_flags().await {
         warn!("Failed to clear initial interrupt flags");
+    }
+
+    // Configure the four encoder push-buttons as INPUT_PULLUP for page
+    // navigation. Polled by the encoder task — no GPIO interrupts enabled.
+    if let Err(_) = encoder_board.configure_buttons().await {
+        error!("Failed to configure encoder buttons");
     }
 
     // —— Spawn tasks ————————————————————————————————————————————————————————

@@ -26,6 +26,38 @@ pub const MODULE_ENCODER: u8 = 0x11;
 pub const STATUS_INTFLAG: u8 = 0x0A;
 
 // ---------------------------------------------------------------------------
+// GPIO module registers (for the encoder push-buttons)
+// ---------------------------------------------------------------------------
+//
+// The four encoder push-buttons are GPIO inputs on the Seesaw (port A). They
+// are configured as `INPUT_PULLUP` and read via the bulk register. We do NOT
+// enable GPIO interrupts — the buttons are polled — so button presses stay off
+// the shared INT line and the rotation interrupt path is unaffected.
+
+/// Set selected GPIO pins as inputs (write bitmask).
+pub const GPIO_DIRCLR_BULK: u8 = 0x03;
+
+/// Bulk GPIO state register (read): each bit is the level of the matching pin.
+pub const GPIO_BULK: u8 = 0x04;
+
+/// Set output-register bits high (write bitmask). With pulls enabled this
+/// selects pull-*up* direction.
+pub const GPIO_BULK_SET: u8 = 0x05;
+
+/// Enable internal pull resistors on selected GPIO pins (write bitmask).
+pub const GPIO_PULLENSET: u8 = 0x0B;
+
+/// Seesaw GPIO pin number for each encoder's push-button switch, indexed by
+/// encoder (0–3). Confirmed against Adafruit's Quad Rotary Encoder example
+/// (`SS_ENC{0..3}_SWITCH`). All are on port A, so a single [`GPIO_BULK`] read
+/// covers them and `1 << pin` masking is valid.
+pub const SWITCH_PINS: [u8; ENCODER_COUNT] = [12, 14, 17, 9];
+
+/// Bitmask of all four switch pins, for the bulk config writes.
+pub const SWITCH_MASK: u32 =
+    (1 << SWITCH_PINS[0]) | (1 << SWITCH_PINS[1]) | (1 << SWITCH_PINS[2]) | (1 << SWITCH_PINS[3]);
+
+// ---------------------------------------------------------------------------
 // Encoder module registers (base addresses)
 // ---------------------------------------------------------------------------
 

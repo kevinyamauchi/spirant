@@ -25,6 +25,7 @@ embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "dc18ee2" 
 embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "dc18ee2" }
 
 embassy-embedded-hal = { git = "https://github.com/embassy-rs/embassy", rev = "dc18ee2" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy", rev = "dc18ee2" }
 
 defmt       = "0.3"
 defmt-rtt   = "0.4"

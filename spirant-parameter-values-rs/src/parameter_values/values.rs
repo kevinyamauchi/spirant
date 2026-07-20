@@ -1,13 +1,13 @@
 use super::error::ParameterError;
 use super::page::Page;
 use super::parameter::{Parameter, ParameterSlot};
-use super::{N_PAGES, PARAMS_PER_PAGE, PARAM_NAMES};
+use super::{N_PAGES, PARAMS_PER_PAGE, PARAM_SPECS};
 
 /// Describes a single parameter change, returned by the change consumption methods.
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct ParameterChange {
-    /// Static display name of the parameter (from [`PARAM_NAMES`]).
+    /// Full parameter name (from [`PARAM_SPECS`]).
     pub name: &'static str,
     /// Current value after the change.
     pub value: i32,
@@ -29,9 +29,9 @@ const TOTAL_SLOTS: usize = N_PAGES * PARAMS_PER_PAGE;
 /// # Initialization
 ///
 /// [`ParameterValues::new()`] builds the page/slot layout from the static
-/// [`PARAM_NAMES`] configuration. Every `Some(name)` entry becomes an
-/// [`Active`](ParameterSlot::Active) slot with default values; every `None`
-/// becomes [`Null`](ParameterSlot::Null).
+/// [`PARAM_SPECS`] configuration. Every `Some(spec)` entry becomes an
+/// [`Active`](ParameterSlot::Active) slot seeded to the spec default; every
+/// `None` becomes [`Null`](ParameterSlot::Null).
 pub struct ParameterValues {
     /// All pages, indexed 0 to `N_PAGES - 1`.
     pub pages: [Page; N_PAGES],
@@ -47,17 +47,18 @@ impl Default for ParameterValues {
 }
 
 impl ParameterValues {
-    /// Create a new instance with Active/Null slots derived from [`PARAM_NAMES`].
+    /// Create a new instance with Active/Null slots derived from [`PARAM_SPECS`].
     ///
-    /// Slots corresponding to `Some(name)` in `PARAM_NAMES` are initialized as
-    /// `Active(Parameter::default())`. Slots corresponding to `None` are `Null`.
+    /// Slots corresponding to `Some(spec)` in `PARAM_SPECS` are initialized as
+    /// `Active(Parameter::from_spec(spec))` (value seeded to the spec default).
+    /// Slots corresponding to `None` are `Null`.
     pub fn new() -> Self {
         let mut pages = [Page::default(); N_PAGES];
 
         for (page_idx, page) in pages.iter_mut().enumerate() {
             for (slot_idx, slot) in page.params.iter_mut().enumerate() {
-                *slot = match PARAM_NAMES[page_idx][slot_idx] {
-                    Some(_) => ParameterSlot::Active(Parameter::default()),
+                *slot = match &PARAM_SPECS[page_idx][slot_idx] {
+                    Some(spec) => ParameterSlot::Active(Parameter::from_spec(spec)),
                     None => ParameterSlot::Null,
                 };
             }
@@ -135,14 +136,17 @@ impl ParameterValues {
     /// use spirant::parameter_values::ParameterValues;
     ///
     /// let mut pv = ParameterValues::new();
-    /// // Encoder 0 on page 0 ("Cutoff") — active slot
+    /// // Encoder 0 on page 0 ("Waveshape", default 15, step 1) — active slot
     /// pv.update_from_encoder(0, 10);
-    /// assert_eq!(pv.pages[0].params[0].as_ref().unwrap().value, 10);
+    /// assert_eq!(pv.pages[0].params[0].as_ref().unwrap().value, 25);
     ///
-    /// // Encoder 3 on page 2 — null slot, no-op
+    /// // Encoder 3 on page 2 (Overdrive) — null slot, no-op
     /// pv.set_page(2).unwrap();
     /// pv.update_from_encoder(3, 5);
     /// ```
+    ///
+    /// The applied change is `delta * step`, where `step` is the parameter's
+    /// per-detent increment; the result is clamped to `[min, max]`.
     pub fn update_from_encoder(&mut self, encoder_idx: usize, delta: i32) {
         if encoder_idx >= PARAMS_PER_PAGE {
             #[cfg(feature = "defmt")]
@@ -156,7 +160,7 @@ impl ParameterValues {
         let slot = &mut self.pages[self.current_page].params[encoder_idx];
         match slot {
             ParameterSlot::Active(param) => {
-                param.set_value(param.value + delta);
+                param.set_value(param.value + delta * param.step);
             }
             ParameterSlot::Null => {
                 #[cfg(feature = "defmt")]
@@ -253,11 +257,11 @@ impl ParameterValues {
     /// use spirant::parameter_values::ParameterValues;
     ///
     /// let mut pv = ParameterValues::new();
-    /// pv.update_from_encoder(0, 42);
+    /// pv.update_from_encoder(0, 42); // Waveshape: 15 default + 42 = 57
     ///
     /// let (changes, count) = pv.take_oled_changes();
     /// assert_eq!(count, 1);
-    /// assert_eq!(changes[0].unwrap().value, 42);
+    /// assert_eq!(changes[0].unwrap().value, 57);
     ///
     /// // Flags are cleared — second call returns nothing.
     /// let (_, count2) = pv.take_oled_changes();
@@ -273,10 +277,11 @@ impl ParameterValues {
             for (enc_idx, slot) in page.params.iter_mut().enumerate() {
                 if let ParameterSlot::Active(param) = slot {
                     if param.changed_oled {
-                        // PARAM_NAMES entry is guaranteed Some for Active slots
+                        // PARAM_SPECS entry is guaranteed Some for Active slots
                         // (maintained by the new() invariant).
-                        let name = PARAM_NAMES[page_idx][enc_idx]
-                            .expect("Active slot must have a name in PARAM_NAMES");
+                        let name = PARAM_SPECS[page_idx][enc_idx]
+                            .expect("Active slot must have a spec in PARAM_SPECS")
+                            .name;
                         result[count] = Some(ParameterChange {
                             name,
                             value: param.value,
@@ -310,8 +315,9 @@ impl ParameterValues {
             for (enc_idx, slot) in page.params.iter_mut().enumerate() {
                 if let ParameterSlot::Active(param) = slot {
                     if param.changed_i2c {
-                        let name = PARAM_NAMES[page_idx][enc_idx]
-                            .expect("Active slot must have a name in PARAM_NAMES");
+                        let name = PARAM_SPECS[page_idx][enc_idx]
+                            .expect("Active slot must have a spec in PARAM_SPECS")
+                            .name;
                         result[count] = Some(ParameterChange {
                             name,
                             value: param.value,
@@ -349,6 +355,7 @@ impl ParameterValues {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parameter_values::ParamSpec;
 
     // Helper: make a ParameterValues with a known active slot value.
     fn make_pv_with_value(page: usize, encoder: usize, value: i32) -> ParameterValues {
@@ -375,12 +382,12 @@ mod tests {
     }
 
     #[test]
-    fn default_initializes_active_and_null_slots_from_param_names() {
+    fn default_initializes_active_and_null_slots_from_param_specs() {
         let pv = ParameterValues::new();
 
         for (page_idx, page) in pv.pages.iter().enumerate() {
             for (slot_idx, slot) in page.params.iter().enumerate() {
-                match PARAM_NAMES[page_idx][slot_idx] {
+                match PARAM_SPECS[page_idx][slot_idx] {
                     Some(_) => assert!(slot.is_active(), "page {} slot {} should be Active", page_idx, slot_idx),
                     None => assert!(!slot.is_active(), "page {} slot {} should be Null", page_idx, slot_idx),
                 }
@@ -388,19 +395,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn default_values_seed_from_specs() {
+        let pv = ParameterValues::new();
+        // A representative sample of v0 patch defaults across pages/units.
+        assert_eq!(pv.pages[0].params[0].as_ref().unwrap().value, 15); // Waveshape %
+        assert_eq!(pv.pages[1].params[2].as_ref().unwrap().value, 150); // Cutoff Floor Hz
+        assert_eq!(pv.pages[4].params[0].as_ref().unwrap().value, 409); // Delay Time ms
+        assert_eq!(pv.pages[5].params[2].as_ref().unwrap().value, 7000); // Damp LP Hz
+    }
+
     // ── Page navigation ──────────────────────────────────────────────
 
     #[test]
     fn set_page_valid() {
         let mut pv = ParameterValues::new();
-        assert!(pv.set_page(2).is_ok());
-        assert_eq!(pv.current_page(), 2);
+        assert!(pv.set_page(5).is_ok());
+        assert_eq!(pv.current_page(), 5);
     }
 
     #[test]
     fn set_page_out_of_bounds() {
         let mut pv = ParameterValues::new();
-        assert_eq!(pv.set_page(4), Err(ParameterError::InvalidPageIndex));
+        assert_eq!(pv.set_page(6), Err(ParameterError::InvalidPageIndex));
         assert_eq!(pv.set_page(100), Err(ParameterError::InvalidPageIndex));
         // current_page unchanged
         assert_eq!(pv.current_page(), 0);
@@ -419,11 +436,11 @@ mod tests {
     #[test]
     fn set_active_page_marks_oled_flags() {
         let mut pv = ParameterValues::new();
-        pv.set_active_page(2).unwrap();
-        assert_eq!(pv.current_page(), 2);
+        pv.set_active_page(5).unwrap();
+        assert_eq!(pv.current_page(), 5);
 
-        // Page 2 has 3 active slots (LFO Rate, LFO Depth, LFO Shape).
-        for (i, slot) in pv.pages[2].params.iter().enumerate() {
+        // Page 5 (Reverb) has 3 active slots and 1 null.
+        for (i, slot) in pv.pages[5].params.iter().enumerate() {
             match slot {
                 ParameterSlot::Active(param) => {
                     assert!(param.changed_oled, "Active slot {} should have changed_oled", i);
@@ -450,7 +467,7 @@ mod tests {
     #[test]
     fn set_active_page_out_of_bounds() {
         let mut pv = ParameterValues::new();
-        assert_eq!(pv.set_active_page(4), Err(ParameterError::InvalidPageIndex));
+        assert_eq!(pv.set_active_page(6), Err(ParameterError::InvalidPageIndex));
         assert_eq!(pv.current_page(), 0);
     }
 
@@ -474,18 +491,30 @@ mod tests {
     #[test]
     fn update_from_encoder_active() {
         let mut pv = ParameterValues::new();
+        // Page 0 slot 0 = Waveshape, default 15, step 1.
         pv.update_from_encoder(0, 10);
 
         let param = pv.pages[0].params[0].as_ref().unwrap();
-        assert_eq!(param.value, 10);
+        assert_eq!(param.value, 25);
         assert!(param.changed_oled);
         assert!(param.changed_i2c);
     }
 
     #[test]
+    fn update_from_encoder_scales_by_step() {
+        let mut pv = ParameterValues::new();
+        // Page 4 slot 0 = Delay Time, default 409, step 5.
+        pv.set_page(4).unwrap();
+        pv.update_from_encoder(0, 2); // 2 detents × step 5 = +10
+
+        let param = pv.pages[4].params[0].as_ref().unwrap();
+        assert_eq!(param.value, 419);
+    }
+
+    #[test]
     fn update_from_encoder_null() {
         let mut pv = ParameterValues::new();
-        pv.set_page(2).unwrap(); // Page 2 slot 3 is Null.
+        pv.set_page(2).unwrap(); // Page 2 (Overdrive) slot 3 is Null.
 
         pv.update_from_encoder(3, 10);
 
@@ -496,19 +525,22 @@ mod tests {
     #[test]
     fn update_from_encoder_clamp_max() {
         let mut pv = ParameterValues::new();
-        pv.update_from_encoder(0, 200); // default max is 127
+        // Page 0 slot 0 = Waveshape, max 100, step 1.
+        pv.update_from_encoder(0, 200);
 
         let param = pv.pages[0].params[0].as_ref().unwrap();
-        assert_eq!(param.value, 127);
+        assert_eq!(param.value, 100);
     }
 
     #[test]
-    fn update_from_encoder_clamp_min() {
+    fn update_from_encoder_clamp_min_with_step() {
         let mut pv = ParameterValues::new();
-        pv.update_from_encoder(0, -50); // default min is 0
+        // Page 3 slot 0 = LFO Rate, default 50, min 10, step 5.
+        pv.set_page(3).unwrap();
+        pv.update_from_encoder(0, -20); // 50 + (-20 × 5) = -50 → clamp to 10
 
-        let param = pv.pages[0].params[0].as_ref().unwrap();
-        assert_eq!(param.value, 0);
+        let param = pv.pages[3].params[0].as_ref().unwrap();
+        assert_eq!(param.value, 10);
     }
 
     #[test]
@@ -527,15 +559,15 @@ mod tests {
     fn page_change_returns_correct_active_slot() {
         let mut pv = ParameterValues::new();
         pv.set_page(1).unwrap();
-        pv.update_from_encoder(0, 42);
+        pv.update_from_encoder(0, 42); // Resonance: 35 default + 42 = 77
 
-        // Page 1 encoder 0 should be updated ("Attack").
+        // Page 1 encoder 0 should be updated ("Resonance").
         let param = pv.pages[1].params[0].as_ref().unwrap();
-        assert_eq!(param.value, 42);
+        assert_eq!(param.value, 77);
 
-        // Page 0 encoder 0 should be unchanged ("Cutoff").
+        // Page 0 encoder 0 should be unchanged ("Waveshape" default).
         let param0 = pv.pages[0].params[0].as_ref().unwrap();
-        assert_eq!(param0.value, 0);
+        assert_eq!(param0.value, 15);
     }
 
     // ── I2C updates ──────────────────────────────────────────────────
@@ -543,6 +575,7 @@ mod tests {
     #[test]
     fn update_from_i2c_sets_only_oled_flag() {
         let mut pv = ParameterValues::new();
+        // I2C writes are absolute (not step-scaled).
         pv.update_from_i2c(0, 50).unwrap();
 
         let param = pv.pages[0].params[0].as_ref().unwrap();
@@ -554,52 +587,56 @@ mod tests {
     #[test]
     fn update_from_i2c_invalid_global_idx() {
         let mut pv = ParameterValues::new();
-        assert_eq!(pv.update_from_i2c(16, 50), Err(ParameterError::InvalidGlobalIndex));
+        // 24 slots total (6 pages × 4).
+        assert_eq!(pv.update_from_i2c(24, 50), Err(ParameterError::InvalidGlobalIndex));
         assert_eq!(pv.update_from_i2c(999, 50), Err(ParameterError::InvalidGlobalIndex));
     }
 
     #[test]
     fn update_from_i2c_null_slot() {
         let mut pv = ParameterValues::new();
-        // Global index 11 = page 2, slot 3 (Null).
+        // Global index 11 = page 2 (Overdrive), slot 3 (Null).
         assert_eq!(pv.update_from_i2c(11, 50), Err(ParameterError::NullSlot));
     }
 
     // ── Global index access ──────────────────────────────────────────
 
     #[test]
-    fn global_index_math_page_0() {
-        let pv = make_pv_with_value(0, 2, 77);
-        let param = pv.get_param_by_global_idx(2).unwrap();
+    fn global_index_math_page_1() {
+        let pv = make_pv_with_value(1, 2, 77);
+        // Global index for page 1, encoder 2 = 4 + 2 = 6.
+        let param = pv.get_param_by_global_idx(6).unwrap();
         assert_eq!(param.value, 77);
     }
 
     #[test]
-    fn global_index_math_page_1() {
-        let pv = make_pv_with_value(1, 1, 33);
-        // Global index for page 1, encoder 1 = 4 + 1 = 5.
-        let param = pv.get_param_by_global_idx(5).unwrap();
+    fn global_index_math_page_5() {
+        let pv = make_pv_with_value(5, 1, 33);
+        // Global index for page 5, encoder 1 = 20 + 1 = 21.
+        let param = pv.get_param_by_global_idx(21).unwrap();
         assert_eq!(param.value, 33);
     }
 
     #[test]
     fn global_index_out_of_bounds() {
         let pv = ParameterValues::new();
-        assert!(pv.get_param_by_global_idx(16).is_none());
+        assert!(pv.get_param_by_global_idx(24).is_none());
         assert!(pv.get_param_by_global_idx(100).is_none());
     }
 
     #[test]
     fn global_index_null_slot_returns_none() {
         let pv = ParameterValues::new();
-        // Global index 11 = page 2, slot 3 (Null).
-        assert!(pv.get_param_by_global_idx(11).is_none());
+        // Global index 23 = page 5, slot 3 (Null).
+        assert!(pv.get_param_by_global_idx(23).is_none());
+        // Global index 2 = page 0, slot 2 (Null).
+        assert!(pv.get_param_by_global_idx(2).is_none());
     }
 
     #[test]
     fn set_param_by_global_idx_works() {
         let mut pv = ParameterValues::new();
-        pv.set_param_by_global_idx(5, 64).unwrap();
+        pv.set_param_by_global_idx(5, 64).unwrap(); // page 1, encoder 1 (Brightness)
 
         let param = pv.pages[1].params[1].as_ref().unwrap();
         assert_eq!(param.value, 64);
@@ -612,14 +649,14 @@ mod tests {
     #[test]
     fn take_oled_changes_returns_name_and_value() {
         let mut pv = ParameterValues::new();
-        pv.update_from_encoder(0, 42); // page 0, encoder 0 = "Cutoff"
+        pv.update_from_encoder(0, 42); // page 0, encoder 0 = "Waveshape" (15 + 42)
 
         let (changes, count) = pv.take_oled_changes();
         assert_eq!(count, 1);
 
         let change = changes[0].unwrap();
-        assert_eq!(change.name, "Cutoff");
-        assert_eq!(change.value, 42);
+        assert_eq!(change.name, "Waveshape"); // full name, not the OLED label
+        assert_eq!(change.value, 57);
         assert_eq!(change.page, 0);
         assert_eq!(change.encoder, 0);
     }
@@ -639,30 +676,29 @@ mod tests {
     #[test]
     fn take_oled_changes_skips_null_slots() {
         let mut pv = ParameterValues::new();
-        // Trigger changes on all 4 encoders of page 2 (3 active, 1 null).
-        pv.set_page(2).unwrap();
+        // Trigger changes on all 4 encoders of page 0 (2 active, 2 null).
         for i in 0..PARAMS_PER_PAGE {
             pv.update_from_encoder(i, 10);
         }
 
         let (changes, count) = pv.take_oled_changes();
-        assert_eq!(count, 3); // Only 3 active slots on page 2.
+        assert_eq!(count, 2); // Only 2 active slots on page 0.
 
         for i in 0..count {
             let change = changes[i].unwrap();
-            assert_eq!(change.page, 2);
+            assert_eq!(change.page, 0);
         }
     }
 
     #[test]
     fn take_oled_changes_skips_unchanged() {
         let mut pv = ParameterValues::new();
-        // Only change encoder 1 on page 0.
+        // Only change encoder 1 on page 0 (Pulse Width).
         pv.update_from_encoder(1, 5);
 
         let (result, count) = pv.take_oled_changes();
         assert_eq!(count, 1);
-        assert_eq!(result[0].unwrap().name, "Resonance");
+        assert_eq!(result[0].unwrap().name, "Pulse Width");
     }
 
     #[test]
@@ -696,11 +732,24 @@ mod tests {
     // ── Parameter defaults and custom ranges ─────────────────────────
 
     #[test]
-    fn min_max_defaults() {
+    fn parameter_default_impl() {
         let param = Parameter::default();
         assert_eq!(param.min_value, 0);
         assert_eq!(param.max_value, 127);
         assert_eq!(param.value, 0);
+        assert_eq!(param.step, 1);
+    }
+
+    #[test]
+    fn parameter_from_spec_seeds_fields() {
+        let spec = ParamSpec::new("Delay Time", "Time", 40, 750, 409, 5);
+        let param = Parameter::from_spec(&spec);
+        assert_eq!(param.value, 409);
+        assert_eq!(param.min_value, 40);
+        assert_eq!(param.max_value, 750);
+        assert_eq!(param.step, 5);
+        assert!(!param.changed_oled);
+        assert!(!param.changed_i2c);
     }
 
     #[test]
@@ -709,6 +758,7 @@ mod tests {
             value: 0,
             min_value: 0,
             max_value: 10,
+            step: 1,
             changed_oled: false,
             changed_i2c: false,
         };
@@ -724,16 +774,18 @@ mod tests {
     #[test]
     fn count_active_params_all_pages() {
         let pv = ParameterValues::new();
-        assert_eq!(pv.count_active_params(0), 4); // Filter: all 4
-        assert_eq!(pv.count_active_params(1), 4); // Envelope: all 4
-        assert_eq!(pv.count_active_params(2), 3); // LFO: 3 active, 1 null
-        assert_eq!(pv.count_active_params(3), 2); // Effects: 2 active, 2 null
+        assert_eq!(pv.count_active_params(0), 2); // Oscillator: 2 active
+        assert_eq!(pv.count_active_params(1), 4); // Filter: all 4
+        assert_eq!(pv.count_active_params(2), 2); // Overdrive: 2 active
+        assert_eq!(pv.count_active_params(3), 4); // Chorus: all 4
+        assert_eq!(pv.count_active_params(4), 4); // Delay: all 4
+        assert_eq!(pv.count_active_params(5), 3); // Reverb: 3 active, 1 null
     }
 
     #[test]
     fn count_active_params_out_of_bounds() {
         let pv = ParameterValues::new();
-        assert_eq!(pv.count_active_params(4), 0);
+        assert_eq!(pv.count_active_params(6), 0);
         assert_eq!(pv.count_active_params(100), 0);
     }
 
@@ -764,22 +816,22 @@ mod tests {
     fn changes_from_multiple_pages() {
         let mut pv = ParameterValues::new();
 
-        // Change on page 0.
+        // Change on page 0 (Waveshape).
         pv.update_from_encoder(0, 10);
 
-        // Change on page 1 via I2C.
-        pv.update_from_i2c(4, 80).unwrap(); // page 1, encoder 0
+        // Change on page 1 via I2C (Resonance, global index 4).
+        pv.update_from_i2c(4, 80).unwrap();
 
         // OLED should see both changes (encoder sets both flags, I2C sets OLED only).
         let (oled_changes, oled_count) = pv.take_oled_changes();
         assert_eq!(oled_count, 2);
-        assert_eq!(oled_changes[0].unwrap().name, "Cutoff");
-        assert_eq!(oled_changes[1].unwrap().name, "Attack");
+        assert_eq!(oled_changes[0].unwrap().name, "Waveshape");
+        assert_eq!(oled_changes[1].unwrap().name, "Resonance");
 
         // I2C should see only the encoder-driven change (the I2C write
         // did not set changed_i2c, so it doesn't appear here).
         let (i2c_changes, i2c_count) = pv.take_i2c_changes();
         assert_eq!(i2c_count, 1);
-        assert_eq!(i2c_changes[0].unwrap().name, "Cutoff");
+        assert_eq!(i2c_changes[0].unwrap().name, "Waveshape");
     }
 }

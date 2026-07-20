@@ -47,7 +47,7 @@ pub struct DisplayConfig {
 impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
-            update_frequency_hz: 60,
+            update_frequency_hz: 30,
             display_width: 128,
             display_height: 64,
             column_width: 32,
@@ -82,6 +82,10 @@ pub struct DisplayState {
     pub param_names: [[u8; 16]; 4],
     /// Parameter values. `None` indicates a null slot (blank column).
     pub param_values: [Option<i32>; 4],
+    /// 0-based index of the current page, for the header "N/M" indicator.
+    pub page_index: usize,
+    /// Total page count. `0` disables the header index (name shown alone).
+    pub page_count: usize,
 }
 
 impl DisplayState {
@@ -220,14 +224,34 @@ where
 {
     let text_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
 
-    // ── Draw page name (centred at top) ──────────────────────────────
+    // ── Draw page name + index (centred at top) ──────────────────────
     let page_name = DisplayState::bytes_to_str(&state.page_name);
     if !page_name.is_empty() {
+        // Append a "N/M" page indicator when a page count is set (e.g.
+        // "Oscillator 1/6"). `page_count == 0` shows the bare name.
+        let mut header: String<20> = String::new();
+        if state.page_count > 0 {
+            let _ = write!(
+                header,
+                "{} {}/{}",
+                page_name,
+                state.page_index + 1,
+                state.page_count
+            );
+        } else {
+            let _ = header.push_str(page_name);
+        }
+
         let centre_x = config.display_width as i32 / 2;
         // Vertically centre within the header region.
         let y = config.header_height as i32 - 1;
-        Text::with_alignment(page_name, Point::new(centre_x, y), text_style, Alignment::Center)
-            .draw(display)?;
+        Text::with_alignment(
+            header.as_str(),
+            Point::new(centre_x, y),
+            text_style,
+            Alignment::Center,
+        )
+        .draw(display)?;
     }
 
     // ── Draw parameter columns ───────────────────────────────────────

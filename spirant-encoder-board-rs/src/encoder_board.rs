@@ -8,7 +8,10 @@ use embedded_hal_async::i2c::I2c;
 
 use crate::driver::SeesawDriver;
 use crate::error::EncoderError;
-use crate::registers::{ENCODER_COUNT, ENCODER_INT_SET, ENCODER_POSITION, MODULE_ENCODER, MODULE_GPIO, STATUS_INTFLAG};
+use crate::registers::{
+    ENCODER_COUNT, ENCODER_INT_SET, ENCODER_POSITION, GPIO_BULK, GPIO_BULK_SET, GPIO_DIRCLR_BULK,
+    GPIO_PULLENSET, MODULE_ENCODER, MODULE_GPIO, STATUS_INTFLAG, SWITCH_MASK, SWITCH_PINS,
+};
 
 /// High-level interface for the Adafruit Quad Rotary Encoder Breakout.
 ///
@@ -199,6 +202,45 @@ where
             self.enable_interrupt(encoder).await?;
         }
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Push-button input
+    // -----------------------------------------------------------------------
+
+    /// Configure the four encoder push-buttons as `INPUT_PULLUP`.
+    ///
+    /// Mirrors the Seesaw `pinMode(pin, INPUT_PULLUP)` sequence for all four
+    /// switch pins at once: set them as inputs, enable pulls, then drive the
+    /// output-register bits high to select pull-*up* direction. Call this once
+    /// at startup before [`read_buttons`](Self::read_buttons).
+    ///
+    /// Note: GPIO interrupts are intentionally **not** enabled — buttons are
+    /// polled, so presses do not touch the shared INT line.
+    pub async fn configure_buttons(&mut self) -> Result<(), EncoderError<I2C::Error>> {
+        self.driver
+            .write_u32(&[MODULE_GPIO, GPIO_DIRCLR_BULK], SWITCH_MASK)
+            .await?;
+        self.driver
+            .write_u32(&[MODULE_GPIO, GPIO_PULLENSET], SWITCH_MASK)
+            .await?;
+        self.driver
+            .write_u32(&[MODULE_GPIO, GPIO_BULK_SET], SWITCH_MASK)
+            .await?;
+        Ok(())
+    }
+
+    /// Read the four encoder push-buttons.
+    ///
+    /// Performs a single bulk read of the GPIO port and decodes each switch.
+    /// The switches are active-low (pulled up, shorted to ground when pressed),
+    /// so a bit reading LOW means **pressed**.
+    ///
+    /// # Returns
+    /// `[bool; 4]` indexed by encoder — `true` = pressed.
+    pub async fn read_buttons(&mut self) -> Result<[bool; 4], EncoderError<I2C::Error>> {
+        let bulk = self.driver.read_u32(&[MODULE_GPIO, GPIO_BULK]).await?;
+        Ok(core::array::from_fn(|i| bulk & (1 << SWITCH_PINS[i]) == 0))
     }
 
     /// Clear all pending interrupt flags and reset the INT pin.

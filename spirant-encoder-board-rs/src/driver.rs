@@ -82,6 +82,39 @@ where
         Ok(i32::from_be_bytes(buf))
     }
 
+    /// Read a 32-bit unsigned integer from a register.
+    ///
+    /// Reads 4 bytes and converts from big-endian (Seesaw byte order). Used for
+    /// the GPIO bulk register, whose bits are the port-A pin states.
+    pub async fn read_u32(
+        &mut self,
+        register: &[u8],
+    ) -> Result<u32, EncoderError<I2C::Error>> {
+        let mut buf = [0u8; 4];
+        self.write_then_read(register, &mut buf).await?;
+        Ok(u32::from_be_bytes(buf))
+    }
+
+    /// Write a 32-bit unsigned integer (e.g. a GPIO pin bitmask) to a register.
+    ///
+    /// Converts `value` to big-endian bytes and sends them with the 2-byte
+    /// register address in a single I2C write.
+    pub async fn write_u32(
+        &mut self,
+        register: &[u8],
+        value: u32,
+    ) -> Result<(), EncoderError<I2C::Error>> {
+        let bytes = value.to_be_bytes();
+
+        let mut buf = [0u8; 6];
+        buf[0..2].copy_from_slice(register);
+        buf[2..6].copy_from_slice(&bytes);
+
+        self.i2c.write(self.address, &buf).await?;
+
+        Ok(())
+    }
+
     /// Write a 32-bit signed integer to a register.
     ///
     /// Converts `value` to big-endian bytes and sends them together with the

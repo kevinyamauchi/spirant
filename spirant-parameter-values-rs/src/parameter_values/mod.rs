@@ -12,11 +12,18 @@
 //! of related synthesis parameters (e.g., Filter, Envelope, LFO, Effects).
 //!
 //! ```text
-//! Page 0 (Filter):   [Cutoff] [Resonance] [Filter Type] [Filter Env]
-//! Page 1 (Envelope): [Attack] [Decay]     [Sustain]     [Release]
-//! Page 2 (LFO):      [Rate]   [Depth]     [Shape]       [---Null---]
-//! Page 3 (Effects):  [Delay]  [Reverb]    [---Null---]  [---Null---]
+//! Page 0 (Oscillator): [Wave]  [PW]     [--Null--] [--Null--]
+//! Page 1 (Filter):     [Res]   [Brite]  [Floor]    [Pass]
+//! Page 2 (Overdrive):  [Drive] [Trim]   [--Null--] [--Null--]
+//! Page 3 (Chorus):     [Rate]  [Depth]  [Dly]      [FB]
+//! Page 4 (Delay):      [Time]  [FB]     [Wet]      [Damp]
+//! Page 5 (Reverb):     [Send]  [Size]   [LP]       [--Null--]
 //! ```
+//!
+//! The parameter set mirrors the Daisy **v0** synth (an EWI-style expressive
+//! lead); see `spirant-daisy/v0/docs/parameters.md`. Each value is stored as an
+//! integer in a real unit (percent, Hz, ms, centi-Hz, or a per-mille
+//! coefficient) — see [`PARAM_SPECS`].
 //!
 //! # Change Tracking
 //!
@@ -45,51 +52,78 @@ mod values;
 
 pub use error::ParameterError;
 pub use page::Page;
-pub use parameter::{Parameter, ParameterSlot};
+pub use parameter::{ParamSpec, Parameter, ParameterSlot};
 pub use values::{ParameterChange, ParameterValues};
 
 /// Number of parameter slots per page (matches the number of physical encoders).
 pub const PARAMS_PER_PAGE: usize = 4;
 
-/// Number of pages in the parameter system.
-pub const N_PAGES: usize = 4;
+/// Number of pages in the parameter system (one per v0 signal-processing stage).
+pub const N_PAGES: usize = 6;
 
 /// Human-readable page names for UI display, indexed by page number.
-pub const PAGE_NAMES: [&str; N_PAGES] = ["Filter", "Envelope", "LFO", "Effects"];
+pub const PAGE_NAMES: [&str; N_PAGES] =
+    ["Oscillator", "Filter", "Overdrive", "Chorus", "Delay", "Reverb"];
 
-/// Parameter names organized by page and encoder slot.
+/// Parameter descriptors organized by page and encoder slot.
 ///
-/// `PARAM_NAMES[page][encoder]` is `Some("Name")` for active slots and
-/// `None` for null slots. This constant drives the initialization of
+/// `PARAM_SPECS[page][encoder]` is `Some(spec)` for active slots and `None`
+/// for null slots. This constant drives the initialization of
 /// [`ParameterValues::new()`] — every `Some` becomes an
-/// [`Active`](ParameterSlot::Active) slot and every `None` becomes
-/// [`Null`](ParameterSlot::Null).
+/// [`Active`](ParameterSlot::Active) slot built via
+/// [`Parameter::from_spec`](parameter::Parameter::from_spec), and every `None`
+/// becomes [`Null`](ParameterSlot::Null).
 ///
-/// **Invariant:** The runtime [`ParameterSlot`] layout must always match
-/// this table. Modifying parameter names or null positions here requires
-/// no other code changes — `new()` derives the layout automatically.
-pub const PARAM_NAMES: [[Option<&str>; PARAMS_PER_PAGE]; N_PAGES] = [
-    // Page 0: Filter (all 4 slots active)
+/// Each spec carries the full `name` (for logs), a short `label` (OLED), the
+/// value `[min, max]` range in a real unit, the `default` (the v0 patch value),
+/// and the per-detent `step`. Units per page: percent unless noted — Cutoff
+/// Floor / Damp LP in Hz, LFO Rate in centi-Hz (×100), Delay Time in ms, and
+/// Delay Damping as a per-mille `OnePole` coefficient (×1000).
+///
+/// **Invariant:** The runtime [`ParameterSlot`] layout must always match this
+/// table. Editing specs or null positions here requires no other code changes —
+/// `new()` derives the layout automatically.
+pub const PARAM_SPECS: [[Option<ParamSpec>; PARAMS_PER_PAGE]; N_PAGES] = [
+    // Page 0: Oscillator (2 active)
     [
-        Some("Cutoff"),
-        Some("Resonance"),
-        Some("Filter Type"),
-        Some("Filter Env"),
-    ],
-    // Page 1: Envelope (all 4 slots active)
-    [
-        Some("Attack"),
-        Some("Decay"),
-        Some("Sustain"),
-        Some("Release"),
-    ],
-    // Page 2: LFO (3 active, encoder 4 is null)
-    [
-        Some("LFO Rate"),
-        Some("LFO Depth"),
-        Some("LFO Shape"),
+        Some(ParamSpec::new("Waveshape", "Wave", 0, 100, 15, 1)),
+        Some(ParamSpec::new("Pulse Width", "PW", 0, 100, 50, 1)),
+        None,
         None,
     ],
-    // Page 3: Effects (2 active, encoders 3 & 4 are null)
-    [Some("Delay Time"), Some("Reverb"), None, None],
+    // Page 1: Filter (all 4 slots active)
+    [
+        Some(ParamSpec::new("Resonance", "Res", 0, 100, 35, 1)),
+        Some(ParamSpec::new("Brightness", "Brite", 0, 100, 66, 1)),
+        Some(ParamSpec::new("Cutoff Floor", "Floor", 20, 500, 150, 5)),
+        Some(ParamSpec::new("Passband Gain", "Pass", 0, 100, 0, 1)),
+    ],
+    // Page 2: Overdrive (2 active)
+    [
+        Some(ParamSpec::new("Drive", "Drive", 0, 100, 0, 1)),
+        Some(ParamSpec::new("Output Trim", "Trim", 0, 100, 40, 1)),
+        None,
+        None,
+    ],
+    // Page 3: Chorus (all 4 slots active)
+    [
+        Some(ParamSpec::new("LFO Rate", "Rate", 10, 500, 50, 5)),
+        Some(ParamSpec::new("LFO Depth", "Depth", 0, 93, 35, 1)),
+        Some(ParamSpec::new("Chorus Delay", "Dly", 0, 100, 60, 1)),
+        Some(ParamSpec::new("Chorus Feedback", "FB", 0, 100, 20, 1)),
+    ],
+    // Page 4: Delay (all 4 slots active)
+    [
+        Some(ParamSpec::new("Delay Time", "Time", 40, 750, 409, 5)),
+        Some(ParamSpec::new("Delay Feedback", "FB", 0, 100, 40, 1)),
+        Some(ParamSpec::new("Wet Mix", "Wet", 0, 100, 50, 1)),
+        Some(ParamSpec::new("Damping", "Damp", 0, 497, 80, 5)),
+    ],
+    // Page 5: Reverb (3 active, encoder 4 is null)
+    [
+        Some(ParamSpec::new("Reverb Send", "Send", 0, 100, 75, 1)),
+        Some(ParamSpec::new("Reverb Size", "Size", 0, 100, 85, 1)),
+        Some(ParamSpec::new("Damp LP", "LP", 1000, 18000, 7000, 250)),
+        None,
+    ],
 ];

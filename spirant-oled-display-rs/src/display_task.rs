@@ -10,7 +10,7 @@
 use embedded_hal_async::i2c::I2c;
 
 use spirant::parameter_values::{
-    ParameterSlot, ParameterValues, PARAMS_PER_PAGE, PARAM_NAMES, PAGE_NAMES,
+    ParameterSlot, ParameterValues, N_PAGES, PARAMS_PER_PAGE, PARAM_SPECS, PAGE_NAMES,
 };
 
 use crate::driver::OledDriver;
@@ -82,7 +82,7 @@ pub async fn display_update_task<I2C>(
         embassy_time::Timer::after(period).await;
 
         // ── Step 1: read state (mutex held briefly) ──────────────────
-        let (page_name, param_names, param_values_snap, changed_flags) = {
+        let (page_idx, page_name, param_names, param_values_snap, changed_flags) = {
             let params = param_values.lock().await;
             let page_idx = params.current_page();
             let page_name: &str = PAGE_NAMES[page_idx];
@@ -95,7 +95,9 @@ pub async fn display_update_task<I2C>(
             for i in 0..PARAMS_PER_PAGE {
                 match &page.params[i] {
                     ParameterSlot::Active(param) => {
-                        names[i] = PARAM_NAMES[page_idx][i];
+                        // OLED shows the short label; the full name is reserved
+                        // for logging / the Daisy identity.
+                        names[i] = PARAM_SPECS[page_idx][i].map(|s| s.label);
                         values[i] = Some(param.value);
                         flags[i] = param.changed_oled;
                     }
@@ -105,11 +107,13 @@ pub async fn display_update_task<I2C>(
                 }
             }
 
-            (page_name, names, values, flags)
+            (page_idx, page_name, names, values, flags)
         }; // ← mutex released here, before any I2C work
 
         // ── Step 2: build new display state ──────────────────────────
-        let new_state = DisplayState::from_params(page_name, param_names, param_values_snap);
+        let mut new_state = DisplayState::from_params(page_name, param_names, param_values_snap);
+        new_state.page_index = page_idx;
+        new_state.page_count = N_PAGES;
 
         // ── Step 3: skip if nothing changed ──────────────────────────
         if new_state == last_state {
