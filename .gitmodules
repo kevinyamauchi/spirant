@@ -1,0 +1,6 @@
+[submodule "spirant-daisy/libDaisy"]
+	path = spirant-daisy/libDaisy
+	url = https://github.com/electro-smith/libDaisy
+[submodule "spirant-daisy/DaisySP"]
+	path = spirant-daisy/DaisySP
+	url = https://github.com/electro-smith/DaisySP
