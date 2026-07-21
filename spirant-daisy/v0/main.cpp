@@ -36,7 +36,9 @@ DaisyPod hw;
 // Encoder:
 //   turn  -> reverb send amount (dry -> wet), accumulated from detent ticks
 // Switch:
-//   button1 -> toggle chorus mono/stereo (LED1 white = mono, cyan = stereo)
+//   button1 -> toggle output mono/stereo (LED1 white = mono, cyan = stereo).
+//              Chorus itself is always mono; the toggle folds the ping-pong
+//              delay + reverb width down to a centered mono sum.
 VariableShapeOscillator var_shape;
 LadderFilter            filt;
 Overdrive               drive;
@@ -53,10 +55,10 @@ float           reverb_send = 0.75f;   // current send, clamped to [0, 1]
 // Output trim after the drive's makeup gain (peak level before reverb).
 constexpr float kPlayLevel = 0.4f;
 
-// Chorus mode, toggled live by switch 1 (button1). Mono = classic dead-center
-// thickener; stereo = decorrelated engines spread hard L/R. Only touched in the
-// audio callback. Applied via apply_chorus_mode() on init and on each toggle.
-bool chorus_stereo = false;
+// Output width, toggled live by switch 1 (button1). Mono sums the final L/R
+// mix down to a centered signal (equal power average); stereo leaves the
+// ping-pong delay + reverb spread as-is. Only touched in the audio callback.
+bool mono_output = false;
 
 // --- MIDI breath control ----------------------------------------------------
 // Shared between the MIDI loop (main) and the audio callback. Single-word float
@@ -98,27 +100,15 @@ void set_pitch(float freq)
     var_shape.SetSyncFreq(freq);
 }
 
-// Configure the two chorus engines for the current mode. Called on init and on
-// each switch-1 toggle -- never per-sample. Mono: identical engines panned to
-// center, so GetLeft() == GetRight() and the lead stays dead center (matching
-// the original patch). Stereo: decorrelated rates/delays panned hard L/R, so the
-// two outputs spread across the field.
-void apply_chorus_mode()
+// Configure the chorus engines. Called once at init -- never per-sample.
+// Chorus is always mono: identical engines panned to center, so
+// GetLeft() == GetRight() and the lead stays dead center.
+void init_chorus_mode()
 {
-    if(chorus_stereo)
-    {
-        chorus.SetLfoFreq(0.40f, 0.55f);
-        chorus.SetDelay(0.5f, 0.7f);
-        chorus.SetLfoDepth(0.35f, 0.30f);
-        chorus.SetPan(0.0f, 1.0f);
-    }
-    else
-    {
-        chorus.SetLfoFreq(0.5f, 0.5f);
-        chorus.SetDelay(0.6f, 0.6f);
-        chorus.SetLfoDepth(0.35f, 0.35f);
-        chorus.SetPan(0.5f, 0.5f);
-    }
+    chorus.SetLfoFreq(0.5f, 0.5f);
+    chorus.SetDelay(0.6f, 0.6f);
+    chorus.SetLfoDepth(0.35f, 0.35f);
+    chorus.SetPan(0.5f, 0.5f);
 }
 
 void audio_callback(AudioHandle::InterleavingInputBuffer  in,
@@ -131,12 +121,11 @@ void audio_callback(AudioHandle::InterleavingInputBuffer  in,
 
     hw.ProcessAllControls();
 
-    // Switch 1 toggles the chorus mono/stereo mode (RisingEdge is debounced and
-    // true for one block per press). Reconfigure the engines only on the change.
+    // Switch 1 toggles the output mono/stereo width (RisingEdge is debounced
+    // and true for one block per press).
     if(hw.button1.RisingEdge())
     {
-        chorus_stereo = !chorus_stereo;
-        apply_chorus_mode();
+        mono_output = !mono_output;
     }
 
     // Encoder ticks nudge the reverb send (ProcessAllControls already debounced
@@ -163,9 +152,9 @@ void audio_callback(AudioHandle::InterleavingInputBuffer  in,
     // fixed 66% brightness sits musically in the 400 Hz .. 9 kHz range.
     const float cutoff_ceiling = fmap(kBrightness, 400.f, 9000.f, Mapping::EXP);
 
-    // LED1: hue shows chorus mode (white = mono, cyan = stereo), brightness
+    // LED1: hue shows output width (white = mono, cyan = stereo), brightness
     // proportional to breath (CC2). Cyan drops the red channel.
-    const float led1_r = chorus_stereo ? 0.f : breath_level;
+    const float led1_r = mono_output ? breath_level : 0.f;
     hw.led1.Set(led1_r, breath_level, breath_level);
     // LED2: blue, brightness proportional to the reverb send (encoder).
     hw.led2.Set(0.f, 0.f, reverb_send);
@@ -216,8 +205,18 @@ void audio_callback(AudioHandle::InterleavingInputBuffer  in,
         // Reverb send (stereo in/out); wet amount set live by the encoder.
         float wetl, wetr;
         verb.Process(pre_l, pre_r, &wetl, &wetr);
-        out[i]     = pre_l + wetl * reverb_send;  // left
-        out[i + 1] = pre_r + wetr * reverb_send;  // right
+        float final_l = pre_l + wetl * reverb_send;
+        float final_r = pre_r + wetr * reverb_send;
+
+        // Switch 1: mono mode folds the ping-pong delay + reverb width down to
+        // a centered signal. Equal-power average (not a plain sum) avoids
+        // clipping headroom loss; the delay/reverb taps are decorrelated
+        // enough that this doesn't cause audible phase cancellation.
+        if(mono_output)
+            final_l = final_r = (final_l + final_r) * 0.5f;
+
+        out[i]     = final_l;  // left
+        out[i + 1] = final_r;  // right
     }
 }
 
@@ -255,8 +254,8 @@ void init_synth(float sample_rate)
     drive.Init();
 
     chorus.Init(sample_rate);
-    chorus.SetFeedback(0.2f);   // same for both engines/modes
-    apply_chorus_mode();        // seed per-engine rate/delay/depth/pan (mono)
+    chorus.SetFeedback(0.2f);   // same for both engines
+    init_chorus_mode();         // seed per-engine rate/delay/depth/pan (mono)
 
     verb.Init(sample_rate);
     verb.SetFeedback(0.85f);  // long hall tail
