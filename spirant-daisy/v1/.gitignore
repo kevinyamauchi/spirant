@@ -1,0 +1,6 @@
+build/
+
+# host test binaries (tests/Makefile)
+tests/crc8_test
+tests/frame_test
+*.dSYM/

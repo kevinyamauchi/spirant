@@ -1,7 +1,17 @@
+.history
 .DS_Store
 
 # folder with build stuff
 target/
+
+# libDaisy/DaisySP Makefile output
+build/
+*.elf
+*.bin
+*.hex
+*.lst
+*.map
+*.srec
 
 # Prerequisites
 *.d

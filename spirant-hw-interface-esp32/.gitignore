@@ -1,0 +1,11 @@
+# Host test binaries
+tests/parameter_values_test
+tests/*.dSYM/
+
+# Arduino IDE build output
+build/
+*.bin
+*.elf
+*.map
+
+.DS_Store

@@ -1,0 +1,13 @@
+(sym_lib_table
+	(version 7)
+	(lib (name "Daisy-Boards") (type "KiCad") (uri "/Users/ky/Documents/code/spirant/pcb/parts/DaisyKiCad-main/Daisy-Boards.kicad_sym") (options "") (descr "") (hidden))
+	(lib (name "SJ2-35853A-SMT-TR") (type "KiCad") (uri "/Users/ky/Documents/code/spirant/pcb/parts/SJ2-35853A-SMT-TR/SJ2-35853A-SMT-TR.kicad_sym") (options "") (descr "") (hidden))
+	(lib (name "2026-07-18_16-24-24") (type "KiCad") (uri "/Users/ky/Documents/code/spirant/pcb/parts/H11L1SR2M/2026-07-18_16-24-24.kicad_sym") (options "") (descr "") (hidden))
+	(lib (name "10164359-00011LF") (type "KiCad") (uri "/Users/ky/Documents/code/spirant/pcb/parts/10164359-00011LF/10164359-00011LF.kicad_sym") (options "") (descr ""))
+	(lib (name "2026-07-23_02-54-09") (type "KiCad") (uri "/Users/ky/Documents/code/spirant/pcb/parts/TPA6110A2DGNR/2026-07-23_02-54-09.kicad_sym") (options "") (descr ""))
+	(lib (name "STX-3120-3B") (type "KiCad") (uri "/Users/ky/Documents/code/spirant/pcb/parts/STX_3120_3B/STX-3120-3B.kicad_sym") (options "") (descr ""))
+	(lib (name "TS02-66-95-BK-100-LCR-D") (type "KiCad") (uri "/Users/ky/Documents/code/spirant/pcb/parts/TS02_66_95_BK_100_LCR_D/TS02-66-95-BK-100-LCR-D.kicad_sym") (options "") (descr ""))
+	(lib (name "USB4085-GF-A") (type "KiCad") (uri "/Users/ky/Documents/code/spirant/pcb/parts/USB4085-GF-A/USB4085-GF-A.kicad_sym") (options "") (descr ""))
+	(lib (name "USB4125-GF-A") (type "KiCad") (uri "/Users/ky/Documents/code/spirant/pcb/parts/USB4125-GF-A/USB4125-GF-A.kicad_sym") (options "") (descr ""))
+	(lib (name "L101011ML04Q") (type "KiCad") (uri "/Users/ky/Documents/code/spirant/pcb/parts/L101011ML04Q/L101011ML04Q.kicad_sym") (options "") (descr ""))
+)

@@ -39,6 +39,13 @@
 //! [`ParameterValues::take_i2c_changes()`] to atomically read and clear
 //! their respective flags.
 //!
+//! The System Bus target does **not** use `take_i2c_changes()`: it must not
+//! clear a flag until the response frame has actually been clocked out to
+//! the Daisy, and even then only if the value has not moved again. It
+//! serializes with [`crate::wire::serialize_frame`] and clears with
+//! [`ParameterValues::clear_i2c_flags_if_unchanged()`]; the MSG line level
+//! follows [`ParameterValues::any_changed_i2c()`].
+//!
 //! # `no_std` Compatibility
 //!
 //! This module uses no heap allocation. All storage is fixed-size arrays

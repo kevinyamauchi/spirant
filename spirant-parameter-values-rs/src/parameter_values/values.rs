@@ -334,6 +334,92 @@ impl ParameterValues {
         (result, count)
     }
 
+    // ── System Bus (I2C target) support ──────────────────────────────
+
+    /// Mark every active slot as pending for the Daisy.
+    ///
+    /// Called once at Pico boot so a fresh (or rebooted) Pico presents the
+    /// MSG line LOW with the full parameter state pending, which is what
+    /// makes the re-sync path identical to normal operation (protocol §3.2).
+    ///
+    /// Only touches `changed_i2c`; `changed_oled` is left alone, since the
+    /// OLED task redraws from its own page-switch logic.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use spirant::parameter_values::ParameterValues;
+    ///
+    /// let mut pv = ParameterValues::new();
+    /// assert!(!pv.any_changed_i2c());
+    /// pv.mark_all_changed_i2c();
+    /// assert!(pv.any_changed_i2c());
+    /// ```
+    pub fn mark_all_changed_i2c(&mut self) {
+        for page in &mut self.pages {
+            for slot in &mut page.params {
+                if let ParameterSlot::Active(param) = slot {
+                    param.changed_i2c = true;
+                }
+            }
+        }
+    }
+
+    /// Returns `true` if any active slot has its `changed_i2c` flag set.
+    ///
+    /// This is the MSG line invariant: the Pico drives MSG LOW exactly when
+    /// this returns `true` (protocol §2.2).
+    pub fn any_changed_i2c(&self) -> bool {
+        self.pages.iter().any(|page| {
+            page.params
+                .iter()
+                .any(|slot| matches!(slot, ParameterSlot::Active(p) if p.changed_i2c))
+        })
+    }
+
+    /// Clear the `changed_i2c` flag of each reported slot, but **only** if
+    /// the slot's current value still equals the value that was reported.
+    ///
+    /// This is the clear-if-unchanged rule (protocol §5.2), applied after a
+    /// response frame is known to have been fully clocked out. A slot whose
+    /// value moved again during the ~2.4 ms transmission window keeps its
+    /// flag, so the newer value is re-reported on the next query. Without
+    /// this rule, the last detent of an encoder burst landing inside the
+    /// transmission window would be silently lost, leaving the display and
+    /// the audio engine permanently divergent.
+    ///
+    /// `reported` is the `(global_idx, value)` list returned by
+    /// [`serialize_frame`](crate::wire::serialize_frame). Entries naming a
+    /// null or out-of-range slot are ignored.
+    ///
+    /// Note that [`take_i2c_changes()`](Self::take_i2c_changes) is *not* a
+    /// substitute: it clears eagerly, before transmission is confirmed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use spirant::parameter_values::ParameterValues;
+    ///
+    /// let mut pv = ParameterValues::new();
+    /// pv.update_from_encoder(0, 1); // Waveshape 15 -> 16, changed_i2c set
+    ///
+    /// // The value still matches what was transmitted, so the flag clears.
+    /// pv.clear_i2c_flags_if_unchanged(&[(0, 16)]);
+    /// assert!(!pv.any_changed_i2c());
+    /// ```
+    pub fn clear_i2c_flags_if_unchanged(&mut self, reported: &[(u8, i32)]) {
+        for &(global_idx, reported_value) in reported {
+            let Ok((page, encoder)) = self.global_to_page_encoder(global_idx as usize) else {
+                continue;
+            };
+            if let ParameterSlot::Active(param) = &mut self.pages[page].params[encoder] {
+                if param.value == reported_value {
+                    param.changed_i2c = false;
+                }
+            }
+        }
+    }
+
     // ── Private helpers ──────────────────────────────────────────────
 
     /// Convert a global parameter index to (page, encoder) coordinates.
